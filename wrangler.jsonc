@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "task-app-workers-hub",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-07",
+  "vars": {
+    "OPENAI_APPS_CHALLENGE": ""
+  }
+}
