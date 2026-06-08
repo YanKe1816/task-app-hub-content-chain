@@ -13,10 +13,12 @@ No `server.py`, `requirements.txt`, `render.yaml`, FastAPI, or Render deployment
 
 ## Apps
 
-Current app:
+Current apps:
 
 - Content Brief Extractor: `/content-brief-extractor`
 - MCP endpoint: `/content-brief-extractor/mcp`
+- Campaign Requirement Extractor: `/campaign-requirement-extractor`
+- MCP endpoint: `/campaign-requirement-extractor/mcp`
 
 Each app is a stateless, deterministic, read-only single-task node. Each app has exactly one MCP endpoint and exposes exactly one tool from that endpoint.
 
@@ -44,7 +46,7 @@ npm run deploy
 
 For local testing, the value can be edited in `wrangler.jsonc` or supplied by Wrangler environment configuration.
 
-Support email for Content Brief Extractor review pages: `sidcraigau@gmail.com`.
+Project support email for review pages: `sidcraigau@gmail.com`.
 
 ## Verification URLs
 
@@ -56,6 +58,11 @@ Support email for Content Brief Extractor review pages: `sidcraigau@gmail.com`.
 - Terms: `http://127.0.0.1:8787/content-brief-extractor/terms`
 - Support: `http://127.0.0.1:8787/content-brief-extractor/support`
 - MCP: `http://127.0.0.1:8787/content-brief-extractor/mcp`
+- Campaign app home: `http://127.0.0.1:8787/campaign-requirement-extractor`
+- Campaign privacy: `http://127.0.0.1:8787/campaign-requirement-extractor/privacy`
+- Campaign terms: `http://127.0.0.1:8787/campaign-requirement-extractor/terms`
+- Campaign support: `http://127.0.0.1:8787/campaign-requirement-extractor/support`
+- Campaign MCP: `http://127.0.0.1:8787/campaign-requirement-extractor/mcp`
 
 There is no generic `/mcp`, `/mcp/{app-slug}`, `/api/mcp`, `/tools`, `/sse`, `/privacy`, `/terms`, or `/support`.
 
@@ -81,6 +88,8 @@ Expected response: the exact `OPENAI_APPS_CHALLENGE` environment variable value 
 
 ## Test `initialize`
 
+Content Brief Extractor:
+
 ```bash
 curl -X POST http://127.0.0.1:8787/content-brief-extractor/mcp \
   -H "Content-Type: application/json" \
@@ -89,7 +98,19 @@ curl -X POST http://127.0.0.1:8787/content-brief-extractor/mcp \
 
 Expected response includes `protocolVersion`, `capabilities.tools`, and `serverInfo`.
 
+Campaign Requirement Extractor:
+
+```bash
+curl -X POST http://127.0.0.1:8787/campaign-requirement-extractor/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+```
+
+Expected response includes `protocolVersion`, `capabilities.tools`, and `serverInfo`.
+
 ## Test `tools/list`
+
+Content Brief Extractor:
 
 ```bash
 curl -X POST http://127.0.0.1:8787/content-brief-extractor/mcp \
@@ -99,7 +120,23 @@ curl -X POST http://127.0.0.1:8787/content-brief-extractor/mcp \
 
 Expected response includes exactly one tool: `content_brief_extractor`, with `outputSchema` and `annotations`.
 
+Campaign Requirement Extractor:
+
+```bash
+curl -X POST http://127.0.0.1:8787/campaign-requirement-extractor/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+```
+
+Expected response includes exactly one tool: `campaign_requirement_extractor`, with `inputSchema`, `outputSchema`, and annotations:
+
+```json
+{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+```
+
 ## Test `tools/call`
+
+Content Brief Extractor:
 
 ```bash
 curl -X POST http://127.0.0.1:8787/content-brief-extractor/mcp \
@@ -123,6 +160,50 @@ Expected `structuredContent`:
 ```
 
 The extractor only returns explicitly stated `topic`, `target_audience`, `channel`, and `deadline` values. Missing extracted fields are returned as `null` and listed in `missing_fields`.
+
+Campaign Requirement Extractor:
+
+```bash
+curl -X POST http://127.0.0.1:8787/campaign-requirement-extractor/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"campaign_requirement_extractor","arguments":{"campaign_text":"Campaign name: Summer Launch Push. Objective: drive signups for the new product trial. Channel: LinkedIn. Budget: $8,000. Deadline: July 15, 2026."}}}'
+```
+
+Expected `structuredContent`:
+
+```json
+{
+  "status": "success",
+  "campaign_name": "Summer Launch Push",
+  "objective": "drive signups for the new product trial",
+  "channel": "LinkedIn",
+  "budget": "$8,000",
+  "deadline": "July 15, 2026",
+  "missing_fields": [],
+  "source_text": "Campaign name: Summer Launch Push. Objective: drive signups for the new product trial. Channel: LinkedIn. Budget: $8,000. Deadline: July 15, 2026.",
+  "errors": []
+}
+```
+
+The extractor only returns explicitly stated `campaign_name`, `objective`, `channel`, `budget`, and `deadline` values. Missing extracted fields are returned as `null` and listed in `missing_fields`. It does not infer values, normalize budget currency, recommend channels, judge budget reasonableness, write copy, publish, schedule, send messages, update systems, or perform operational actions.
+
+## Local Regression Checks
+
+After adding or changing an app, run:
+
+```bash
+npm install
+npm run typecheck
+npm run dev
+```
+
+Then confirm:
+
+- `/`, `/health`, and `/.well-known/openai-apps-challenge` work.
+- Each app home, privacy, terms, and support page returns HTML with `Home | Privacy | Terms | Support` links in that order.
+- `POST /content-brief-extractor/mcp` supports `initialize`, `tools/list`, and `tools/call`; `tools/list` exposes only `content_brief_extractor`.
+- `POST /campaign-requirement-extractor/mcp` supports `initialize`, `tools/list`, and `tools/call`; `tools/list` exposes only `campaign_requirement_extractor`.
+- Content Brief Extractor `outputSchema` and annotations remain unchanged when new apps are added.
 
 ## Common Failures
 
