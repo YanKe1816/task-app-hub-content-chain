@@ -32,7 +32,18 @@ type CampaignRequirementOutput = {
   errors: ToolError[];
 };
 
-type ToolOutput = ContentBriefOutput | CampaignRequirementOutput;
+type SocialPostMetadataOutput = {
+  status: "success" | "error";
+  platform: string | null;
+  post_time: string | null;
+  topic: string | null;
+  asset_requirements: string | null;
+  missing_fields: string[];
+  source_text: string;
+  errors: ToolError[];
+};
+
+type ToolOutput = ContentBriefOutput | CampaignRequirementOutput | SocialPostMetadataOutput;
 
 type JsonRpcRequest = {
   jsonrpc?: string;
@@ -216,6 +227,86 @@ const CAMPAIGN_REQUIREMENT_TOOL: ToolDefinition = {
   annotations: CAMPAIGN_ANNOTATIONS
 };
 
+const SOCIAL_POST_METADATA_TOOL: ToolDefinition = {
+  name: "social_post_metadata_extractor",
+  title: "Social Post Metadata Extractor",
+  description:
+    "Use this tool when the user provides a social media posting request and needs structured social post metadata fields. The tool returns platform, post time, topic, asset requirements, missing fields, source text, and errors. Do not use this tool to write social posts, publish posts, schedule posts, recommend platforms, create assets, contact external services, or perform any operational action. This tool is useful when deterministic structured extraction is needed.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      post_text: {
+        type: "string",
+        description: "Raw social media posting request text provided by the user."
+      }
+    },
+    required: ["post_text"],
+    additionalProperties: false
+  },
+  outputSchema: {
+    type: "object",
+    properties: {
+      status: {
+        type: "string",
+        enum: ["success", "error"]
+      },
+      platform: {
+        type: ["string", "null"],
+        description: "Explicit social media platform if present."
+      },
+      post_time: {
+        type: ["string", "null"],
+        description: "Explicit post time or scheduled time if present."
+      },
+      topic: {
+        type: ["string", "null"],
+        description: "Explicit post topic if present."
+      },
+      asset_requirements: {
+        type: ["string", "null"],
+        description: "Explicit asset requirements if present."
+      },
+      missing_fields: {
+        type: "array",
+        items: {
+          type: "string"
+        }
+      },
+      source_text: {
+        type: "string"
+      },
+      errors: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            code: {
+              type: "string"
+            },
+            message: {
+              type: "string"
+            }
+          },
+          required: ["code", "message"],
+          additionalProperties: false
+        }
+      }
+    },
+    required: [
+      "status",
+      "platform",
+      "post_time",
+      "topic",
+      "asset_requirements",
+      "missing_fields",
+      "source_text",
+      "errors"
+    ],
+    additionalProperties: false
+  },
+  annotations: CAMPAIGN_ANNOTATIONS
+};
+
 const APPS: AppDefinition[] = [
   {
     slug: "content-brief-extractor",
@@ -236,6 +327,16 @@ const APPS: AppDefinition[] = [
     renderPrivacy: renderCampaignRequirementPrivacyPage,
     renderTerms: renderCampaignRequirementTermsPage,
     renderSupport: renderCampaignRequirementSupportPage
+  },
+  {
+    slug: "social-post-metadata-extractor",
+    name: "Social Post Metadata Extractor",
+    tool: SOCIAL_POST_METADATA_TOOL,
+    call: extractSocialPostMetadata,
+    renderHome: renderSocialPostMetadataHome,
+    renderPrivacy: renderSocialPostMetadataPrivacyPage,
+    renderTerms: renderSocialPostMetadataTermsPage,
+    renderSupport: renderSocialPostMetadataSupportPage
   }
 ];
 
@@ -356,6 +457,12 @@ async function handleMcp(request: Request, app: AppDefinition): Promise<Response
               "An internal error occurred while processing the campaign requirement text.",
               ""
             )
+          : app.tool.name === "social_post_metadata_extractor"
+            ? socialPostMetadataErrorOutput(
+                "internal_error",
+                "An internal error occurred while processing the social post metadata text.",
+                ""
+              )
           : errorOutput("internal_error", "An unexpected error occurred.", "", []);
       return jsonResponse({
         jsonrpc: "2.0",
@@ -499,6 +606,66 @@ function extractCampaignRequirement(input: unknown): CampaignRequirementOutput {
   };
 }
 
+function extractSocialPostMetadata(input: unknown): SocialPostMetadataOutput {
+  if (!isRecord(input) || !Object.prototype.hasOwnProperty.call(input, "post_text")) {
+    return socialPostMetadataErrorOutput("missing_field", "post_text is required.", "");
+  }
+
+  const originalSourceText = typeof input.post_text === "string" ? input.post_text : "";
+  if (typeof input.post_text !== "string" || input.post_text.trim() === "") {
+    return socialPostMetadataErrorOutput("invalid_value", "post_text must be a non-empty string.", "");
+  }
+
+  const sourceText = input.post_text.trim();
+  if (isSocialPostMetadataOutOfScope(sourceText)) {
+    return socialPostMetadataErrorOutput(
+      "out_of_scope",
+      "This tool only extracts explicitly stated social post metadata fields and cannot write posts, publish posts, schedule posts, recommend platforms, create assets, contact external services, or perform operational actions.",
+      originalSourceText
+    );
+  }
+
+  const platform = cleanValue(firstMatch(sourceText, [
+    /\bplatform\s*(?::|is)\s*(?:the\s+)?(.+?)(?=\.\s+|\n|$)/i,
+    /\bthe\s+platform\s+is\s+(.+?)(?=\.\s+|\n|$)/i
+  ]));
+  const postTime = cleanValue(firstMatch(sourceText, [
+    /\bpost\s+time\s*(?::|is)\s*(.+?)(?=\.\s+|\n|$)/i,
+    /\bscheduled\s+for\s+(.+?)(?=\.\s+|\n|$)/i,
+    /\bschedule(?:d)?\s+time\s*(?::|is)\s*(.+?)(?=\.\s+|\n|$)/i
+  ]));
+  const topic = cleanValue(firstMatch(sourceText, [
+    /\btopic\s*(?::|is)\s*(.+?)(?=\.\s+|\n|$)/i,
+    /\bpost\s+about\s+(.+?)(?=\.\s+|\n|$)/i
+  ]));
+  const assetRequirements = cleanValue(firstMatch(sourceText, [
+    /\basset\s+requirements\s*(?::|is)\s*(.+?)(?=\.\s+|\n|$)/i,
+    /\bassets\s+needed\s*(?::|is)\s*(.+?)(?=\.\s+|\n|$)/i,
+    /\bwe\s+need\s+assets\s+for\s+(.+?)(?=\.\s+|\n|$)/i,
+    /\bassets?\s+for\s+(.+?)(?=\.\s+|\n|$)/i
+  ]));
+
+  const missingFields = [
+    ["platform", platform],
+    ["post_time", postTime],
+    ["topic", topic],
+    ["asset_requirements", assetRequirements]
+  ]
+    .filter(([, value]) => value === null)
+    .map(([field]) => field as string);
+
+  return {
+    status: "success",
+    platform,
+    post_time: postTime,
+    topic,
+    asset_requirements: assetRequirements,
+    missing_fields: missingFields,
+    source_text: originalSourceText,
+    errors: []
+  };
+}
+
 function isOutOfScope(sourceText: string): boolean {
   const lowered = sourceText.toLowerCase();
   const outOfScopePatterns = [
@@ -507,6 +674,20 @@ function isOutOfScope(sourceText: string): boolean {
     /\b(recommend|suggest|choose)\s+.*\b(channel|platform|strategy|topic|audience)\b/,
     /\b(publish|schedule|send|update)\b/,
     /\b(judge|score|evaluate|rate|review)\s+.*\b(quality|content|brief)\b/
+  ];
+  return outOfScopePatterns.some((pattern) => pattern.test(lowered));
+}
+
+function isSocialPostMetadataOutOfScope(sourceText: string): boolean {
+  const lowered = sourceText.toLowerCase();
+  const outOfScopePatterns = [
+    /\b(write|draft|compose|generate)\s+.*\b(linkedin\s+|instagram\s+|x\s+|facebook\s+|tiktok\s+)?(post|caption|copy|content)\b/,
+    /\b(create|make|design|generate)\s+.*\b(asset|assets|image|images|photo|photos|video|clip|graphic|graphics)\b/,
+    /\b(recommend|suggest|choose|which)\s+.*\b(platform|channel)\b/,
+    /\b(publish|send|post\s+this|update\s+calendar|contact)\b/,
+    /\bschedule\s+(?:this\s+)?posts?\b/,
+    /\bcall\s+.*\b(api|external service|social media)\b/,
+    /\bstrategy\s+decision\b/
   ];
   return outOfScopePatterns.some((pattern) => pattern.test(lowered));
 }
@@ -572,11 +753,108 @@ function campaignErrorOutput(code: ErrorCode, message: string, sourceText: strin
   };
 }
 
+function socialPostMetadataErrorOutput(code: ErrorCode, message: string, sourceText: string): SocialPostMetadataOutput {
+  return {
+    status: "error",
+    platform: null,
+    post_time: null,
+    topic: null,
+    asset_requirements: null,
+    missing_fields: [],
+    source_text: sourceText,
+    errors: [{ code, message }]
+  };
+}
+
 function renderHubHome(): string {
   const links = APPS.map((app) => `<li><a href="/${app.slug}">${escapeHtml(app.name)}</a></li>`).join("");
   return page(
     "Task App Workers Hub",
     `<h1>Task App Workers Hub</h1><p>Shared Cloudflare Workers hub for independent OpenAI Task Apps.</p><ul>${links}</ul>`
+  );
+}
+
+function renderSocialPostMetadataHome(app: AppDefinition): string {
+  return page(
+    app.name,
+    `${nav(app)}<h1>${escapeHtml(app.name)}</h1>
+<h2>What this app does</h2>
+<p>Social Post Metadata Extractor is a read-only task app that extracts structured social post metadata fields from user-provided social media posting request text.</p>
+<h2>Expected input</h2>
+<p>The app accepts one input field: <code>post_text</code>, containing raw social media posting request text with explicitly stated metadata.</p>
+<h2>Structured output</h2>
+<p>The app returns platform, post_time, topic, asset_requirements, missing_fields, source_text, and errors.</p>
+<h2>What this app does not do</h2>
+<p>This app does not write social posts, generate captions, create marketing copy, recommend platforms, create assets, publish posts, schedule posts, send messages, update calendars, call social media APIs, contact external services, or make strategy decisions.</p>
+<h2>Safety and data handling</h2>
+<p>The app is stateless, read-only, does not require login, does not store submitted data, does not call external APIs, and performs no operational actions.</p>
+<h2>MCP endpoint</h2>
+<p><code>/${app.slug}/mcp</code></p>`
+  );
+}
+
+function renderSocialPostMetadataPrivacyPage(app: AppDefinition): string {
+  return page(
+    `${app.name} Privacy`,
+    `${nav(app)}<h1>${escapeHtml(app.name)} Privacy</h1>
+<h2>Data Collected</h2>
+<p>The app processes only the submitted <code>post_text</code> in the current request. It does not collect data from external sources, social media platforms, calendars, databases, or third-party services.</p>
+<h2>Tool Inputs</h2>
+<p>Tool input: <code>post_text</code>.</p>
+<h2>Tool Outputs</h2>
+<p>Tool outputs: platform, post_time, topic, asset_requirements, missing_fields, source_text, and errors.</p>
+<h2>Purpose of Processing</h2>
+<p>The submitted text is used only to extract explicitly stated social post metadata fields.</p>
+<h2>Recipients and Sharing</h2>
+<p>The app does not sell user data, does not share submitted data with third parties, does not call external APIs, and does not access social media platforms.</p>
+<h2>Retention</h2>
+<p>The app has no storage. Submitted inputs and outputs are not retained by this app after request processing is complete.</p>
+<h2>User Controls</h2>
+<p>Users control what they submit and may remove sensitive details before submitting text. Privacy questions or deletion requests can be sent to ${SUPPORT_LINK}.</p>
+<h2>Login and Accounts</h2>
+<p>No login or account is required.</p>
+<h2>Read-Only Operation and No Side Effects</h2>
+<p>The app is read-only and stateless. It performs no downstream writes, no publishing, no scheduling, no message sending, no asset creation, and no operational actions.</p>
+<h2>Contact</h2>
+<p>Support contact: ${SUPPORT_LINK}.</p>`
+  );
+}
+
+function renderSocialPostMetadataTermsPage(app: AppDefinition): string {
+  return page(
+    `${app.name} Terms`,
+    `${nav(app)}<h1>${escapeHtml(app.name)} Terms</h1>
+<h2>Permitted Use</h2>
+<p>Social Post Metadata Extractor may be used to extract explicitly stated platform, post time, topic, and asset requirement fields from user-provided social posting request text.</p>
+<h2>User Responsibility</h2>
+<p>Users should submit only text they have the right to process and should remove sensitive or unnecessary personal data before submitting text.</p>
+<h2>Limitations</h2>
+<p>The app extracts only explicitly stated fields. It does not infer missing values, guess platform, guess post time, generate topics, create asset requirements, or make strategy decisions.</p>
+<h2>No Operational Actions</h2>
+<p>The app does not write social posts, generate captions, publish posts, schedule posts, send messages, update calendars, create assets, contact external parties, or modify external systems.</p>
+<h2>No External System Writes</h2>
+<p>The app is stateless, read-only, unauthenticated, does not store submitted data, does not call external APIs, and does not write to social media platforms or downstream systems.</p>
+<h2>Data and Privacy</h2>
+<p>Data handling is described on the privacy page. The app processes only submitted <code>post_text</code> and returns structured extraction output.</p>
+<h2>Contact</h2>
+<p>Support questions, privacy questions, or deletion requests can be sent to ${SUPPORT_LINK}.</p>`
+  );
+}
+
+function renderSocialPostMetadataSupportPage(app: AppDefinition): string {
+  return page(
+    `${app.name} Support`,
+    `${nav(app)}<h1>${escapeHtml(app.name)} Support</h1>
+<h2>Contact</h2>
+<p>For support, privacy questions, or deletion requests, contact ${SUPPORT_LINK}.</p>
+<h2>What to Include</h2>
+<p>When contacting support, include the app name, the page or endpoint involved, a brief description of the issue, and any non-sensitive example input needed to reproduce the problem.</p>
+<h2>Support Scope</h2>
+<p>Support covers app availability, review pages, MCP endpoint behavior, schema issues, and privacy or deletion questions.</p>
+<h2>App Boundaries</h2>
+<p>This app only extracts explicitly stated social post metadata fields. It does not write posts, generate captions, recommend platforms, create assets, publish, schedule, send messages, update calendars, call social media APIs, contact external services, or perform operational actions.</p>
+<h2>Data Handling Summary</h2>
+<p>This app processes only submitted <code>post_text</code>. It is read-only, stateless, does not store submitted inputs or outputs, does not sell data, and does not call external APIs.</p>`
   );
 }
 
