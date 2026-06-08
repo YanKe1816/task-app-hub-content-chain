@@ -20,6 +20,20 @@ type ContentBriefOutput = {
   errors: ToolError[];
 };
 
+type CampaignRequirementOutput = {
+  status: "success" | "error";
+  campaign_name: string | null;
+  objective: string | null;
+  channel: string | null;
+  budget: string | null;
+  deadline: string | null;
+  missing_fields: string[];
+  source_text: string;
+  errors: ToolError[];
+};
+
+type ToolOutput = ContentBriefOutput | CampaignRequirementOutput;
+
 type JsonRpcRequest = {
   jsonrpc?: string;
   id?: string | number | null;
@@ -39,6 +53,7 @@ type ToolDefinition = {
     readOnlyHint: true;
     openWorldHint: false;
     destructiveHint: false;
+    idempotentHint?: true;
   };
 };
 
@@ -46,7 +61,11 @@ type AppDefinition = {
   slug: string;
   name: string;
   tool: ToolDefinition;
-  call: (input: unknown) => ContentBriefOutput;
+  call: (input: unknown) => ToolOutput;
+  renderHome: (app: AppDefinition) => string;
+  renderPrivacy: (app: AppDefinition) => string;
+  renderTerms: (app: AppDefinition) => string;
+  renderSupport: (app: AppDefinition) => string;
 };
 
 const SUPPORT_EMAIL = "sidcraigau@gmail.com";
@@ -56,6 +75,13 @@ const DEFAULT_ANNOTATIONS = {
   readOnlyHint: true,
   openWorldHint: false,
   destructiveHint: false
+} as const;
+
+const CAMPAIGN_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false
 } as const;
 
 const ERROR_SCHEMA = {
@@ -105,12 +131,111 @@ const CONTENT_BRIEF_TOOL: ToolDefinition = {
   annotations: DEFAULT_ANNOTATIONS
 };
 
+const CAMPAIGN_REQUIREMENT_TOOL: ToolDefinition = {
+  name: "campaign_requirement_extractor",
+  title: "Campaign Requirement Extractor",
+  description:
+    "Use this tool when the user provides campaign requirement text and needs structured campaign requirement fields. The tool returns campaign name, objective, channel, budget, deadline, missing fields, source text, and errors. Do not use this tool to design a campaign strategy, judge whether a budget is reasonable, write marketing copy, recommend channels, publish campaigns, schedule campaigns, send messages, update systems, or take operational actions. This tool is useful when deterministic structured extraction is needed.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      campaign_text: {
+        type: "string",
+        description: "Raw campaign requirement text containing explicitly stated campaign details."
+      }
+    },
+    required: ["campaign_text"],
+    additionalProperties: false
+  },
+  outputSchema: {
+    type: "object",
+    properties: {
+      status: {
+        type: "string",
+        enum: ["success", "error"]
+      },
+      campaign_name: {
+        type: ["string", "null"],
+        description: "Explicit campaign name if present."
+      },
+      objective: {
+        type: ["string", "null"],
+        description: "Explicit campaign objective if present."
+      },
+      channel: {
+        type: ["string", "null"],
+        description: "Explicit campaign channel if present."
+      },
+      budget: {
+        type: ["string", "null"],
+        description: "Explicit campaign budget if present."
+      },
+      deadline: {
+        type: ["string", "null"],
+        description: "Explicit campaign deadline if present."
+      },
+      missing_fields: {
+        type: "array",
+        items: {
+          type: "string"
+        }
+      },
+      source_text: {
+        type: "string"
+      },
+      errors: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            code: {
+              type: "string"
+            },
+            message: {
+              type: "string"
+            }
+          },
+          required: ["code", "message"],
+          additionalProperties: false
+        }
+      }
+    },
+    required: [
+      "status",
+      "campaign_name",
+      "objective",
+      "channel",
+      "budget",
+      "deadline",
+      "missing_fields",
+      "source_text",
+      "errors"
+    ],
+    additionalProperties: false
+  },
+  annotations: CAMPAIGN_ANNOTATIONS
+};
+
 const APPS: AppDefinition[] = [
   {
     slug: "content-brief-extractor",
     name: "Content Brief Extractor",
     tool: CONTENT_BRIEF_TOOL,
-    call: extractContentBrief
+    call: extractContentBrief,
+    renderHome: renderContentBriefHome,
+    renderPrivacy: renderContentBriefPrivacyPage,
+    renderTerms: renderContentBriefTermsPage,
+    renderSupport: renderContentBriefSupportPage
+  },
+  {
+    slug: "campaign-requirement-extractor",
+    name: "Campaign Requirement Extractor",
+    tool: CAMPAIGN_REQUIREMENT_TOOL,
+    call: extractCampaignRequirement,
+    renderHome: renderCampaignRequirementHome,
+    renderPrivacy: renderCampaignRequirementPrivacyPage,
+    renderTerms: renderCampaignRequirementTermsPage,
+    renderSupport: renderCampaignRequirementSupportPage
   }
 ];
 
@@ -137,19 +262,19 @@ export default {
     }
 
     if (request.method === "GET" && path === `/${app.slug}`) {
-      return htmlResponse(renderAppHome(app));
+      return htmlResponse(app.renderHome(app));
     }
 
     if (request.method === "GET" && path === `/${app.slug}/privacy`) {
-      return htmlResponse(renderPrivacyPage(app));
+      return htmlResponse(app.renderPrivacy(app));
     }
 
     if (request.method === "GET" && path === `/${app.slug}/terms`) {
-      return htmlResponse(renderTermsPage(app));
+      return htmlResponse(app.renderTerms(app));
     }
 
     if (request.method === "GET" && path === `/${app.slug}/support`) {
-      return htmlResponse(renderSupportPage(app));
+      return htmlResponse(app.renderSupport(app));
     }
 
     if (request.method === "POST" && path === `/${app.slug}/mcp`) {
@@ -224,7 +349,14 @@ async function handleMcp(request: Request, app: AppDefinition): Promise<Response
         }
       });
     } catch {
-      const result = errorOutput("internal_error", "An unexpected error occurred.", "", []);
+      const result =
+        app.tool.name === "campaign_requirement_extractor"
+          ? campaignErrorOutput(
+              "internal_error",
+              "An internal error occurred while processing the campaign requirement text.",
+              ""
+            )
+          : errorOutput("internal_error", "An unexpected error occurred.", "", []);
       return jsonResponse({
         jsonrpc: "2.0",
         id,
@@ -300,6 +432,72 @@ function extractContentBrief(input: unknown): ContentBriefOutput {
   };
 }
 
+function extractCampaignRequirement(input: unknown): CampaignRequirementOutput {
+  if (!isRecord(input) || !Object.prototype.hasOwnProperty.call(input, "campaign_text")) {
+    return campaignErrorOutput("missing_field", "campaign_text is required.", "");
+  }
+
+  if (typeof input.campaign_text !== "string" || input.campaign_text.trim() === "") {
+    return campaignErrorOutput("invalid_value", "campaign_text must be a non-empty string.", "");
+  }
+
+  const sourceText = input.campaign_text.trim();
+  if (isCampaignOutOfScope(sourceText)) {
+    return campaignErrorOutput(
+      "out_of_scope",
+      "This tool only extracts explicitly stated campaign requirement fields and cannot design campaign strategy, judge budget reasonableness, write marketing copy, recommend channels, publish, schedule, send messages, update systems, or take operational actions.",
+      sourceText
+    );
+  }
+
+  const campaignName = cleanValue(firstMatch(sourceText, [
+    /\bcampaign\s+name\s*(?::|is)\s*(.+?)(?=\.\s+|\n|$)/i,
+    /\bcampaign\s*:\s*(.+?)(?=\.\s+|\n|$)/i,
+    /\bcampaign\s+is\s+called\s+(.+?)(?=\.\s+|\n|$)/i,
+    /\bcampaign\s+named\s+(.+?)(?=\.\s+|\n|$)/i,
+    /\bcalled\s+(.+?)(?=\.\s+|\n|$)/i,
+    /\bneed\s+(?:an?\s+)?(.+?\bcampaign)\b/i
+  ]));
+  const objective = cleanValue(firstMatch(sourceText, [
+    /\bobjective\s*(?::|is)\s*(.+?)(?=\.\s+|\n|$)/i,
+    /\bgoal\s*(?::|is)\s*(?:to\s+)?(.+?)(?=\.\s+|\n|$)/i
+  ]));
+  const channel = cleanValue(firstMatch(sourceText, [
+    /\bchannel\s*(?::|is)\s*(?:the\s+)?(.+?)(?=\.\s+|\n|$)/i,
+    /\brun\s+it\s+on\s+(.+?)(?=\.\s+|\n|$)/i,
+    /\bon\s+(LinkedIn|Instagram(?:\s+and\s+TikTok)?|TikTok|Facebook|Google Ads|email|the company blog)\b/i
+  ]));
+  const budget = cleanValue(firstMatch(sourceText, [
+    /\bbudget\s*(?::|is)\s*(.+?)(?=\.\s+|\n|$)/i
+  ]));
+  const deadline = cleanValue(firstMatch(sourceText, [
+    /\bdeadline\s*(?::|is)\s*(.+?)(?=\.\s+|\n|$)/i,
+    /\bdue\s*(?::|on|by|is)\s*(.+?)(?=\.\s+|\n|$)/i
+  ]));
+
+  const missingFields = [
+    ["campaign_name", campaignName],
+    ["objective", objective],
+    ["channel", channel],
+    ["budget", budget],
+    ["deadline", deadline]
+  ]
+    .filter(([, value]) => value === null)
+    .map(([field]) => field as string);
+
+  return {
+    status: "success",
+    campaign_name: campaignName,
+    objective,
+    channel,
+    budget,
+    deadline,
+    missing_fields: missingFields,
+    source_text: sourceText,
+    errors: []
+  };
+}
+
 function isOutOfScope(sourceText: string): boolean {
   const lowered = sourceText.toLowerCase();
   const outOfScopePatterns = [
@@ -308,6 +506,22 @@ function isOutOfScope(sourceText: string): boolean {
     /\b(recommend|suggest|choose)\s+.*\b(channel|platform|strategy|topic|audience)\b/,
     /\b(publish|schedule|send|update)\b/,
     /\b(judge|score|evaluate|rate|review)\s+.*\b(quality|content|brief)\b/
+  ];
+  return outOfScopePatterns.some((pattern) => pattern.test(lowered));
+}
+
+function isCampaignOutOfScope(sourceText: string): boolean {
+  const lowered = sourceText.toLowerCase();
+  const outOfScopePatterns = [
+    /\bdesign\s+.*\b(campaign\s+)?strategy\b/,
+    /\b(create|develop|build|make)\s+.*\b(strategy|campaign idea|campaign ideas|marketing plan)\b/,
+    /\b(is|are)\s+.*\b(enough|reasonable|sufficient)\b.*\bbudget\b/,
+    /\bbudget\b.*\b(enough|reasonable|sufficient)\b/,
+    /\bshould\s+we\s+.*\bbudget\b/,
+    /\b(recommend|suggest|choose)\s+.*\b(channel|platform|strategy|budget|objective)\b/,
+    /\b(write|draft|compose|generate)\s+.*\b(copy|ad copy|caption|email|script|marketing copy)\b/,
+    /\b(publish|schedule|send|update)\b/,
+    /\btake\s+operational\s+actions?\b/
   ];
   return outOfScopePatterns.some((pattern) => pattern.test(lowered));
 }
@@ -343,6 +557,20 @@ function errorOutput(code: ErrorCode, message: string, sourceText: string, missi
   };
 }
 
+function campaignErrorOutput(code: ErrorCode, message: string, sourceText: string): CampaignRequirementOutput {
+  return {
+    status: "error",
+    campaign_name: null,
+    objective: null,
+    channel: null,
+    budget: null,
+    deadline: null,
+    missing_fields: [],
+    source_text: sourceText,
+    errors: [{ code, message }]
+  };
+}
+
 function renderHubHome(): string {
   const links = APPS.map((app) => `<li><a href="/${app.slug}">${escapeHtml(app.name)}</a></li>`).join("");
   return page(
@@ -351,7 +579,7 @@ function renderHubHome(): string {
   );
 }
 
-function renderAppHome(app: AppDefinition): string {
+function renderContentBriefHome(app: AppDefinition): string {
   return page(
     app.name,
     `${nav(app)}<h1>${escapeHtml(app.name)}</h1>
@@ -370,7 +598,7 @@ function renderAppHome(app: AppDefinition): string {
   );
 }
 
-function renderPrivacyPage(app: AppDefinition): string {
+function renderContentBriefPrivacyPage(app: AppDefinition): string {
   return page(
     `${app.name} Privacy`,
     `${nav(app)}<h1>${escapeHtml(app.name)} Privacy</h1>
@@ -397,7 +625,7 @@ function renderPrivacyPage(app: AppDefinition): string {
   );
 }
 
-function renderTermsPage(app: AppDefinition): string {
+function renderContentBriefTermsPage(app: AppDefinition): string {
   return page(
     `${app.name} Terms`,
     `${nav(app)}<h1>${escapeHtml(app.name)} Terms</h1>
@@ -416,7 +644,7 @@ function renderTermsPage(app: AppDefinition): string {
   );
 }
 
-function renderSupportPage(app: AppDefinition): string {
+function renderContentBriefSupportPage(app: AppDefinition): string {
   return page(
     `${app.name} Support`,
     `${nav(app)}<h1>${escapeHtml(app.name)} Support</h1>
@@ -430,6 +658,96 @@ function renderSupportPage(app: AppDefinition): string {
 <p>This app only extracts explicitly stated content brief fields. It does not write content, create marketing strategy, recommend channels, publish content, send messages, update records, or call external APIs.</p>
 <h2>Data handling</h2>
 <p>This app processes only submitted <code>brief_text</code>. It is read-only, stateless, and does not store, send, publish, update, or modify data.</p>`
+  );
+}
+
+function renderCampaignRequirementHome(app: AppDefinition): string {
+  const campaignSupportLink = `<a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>`;
+  return page(
+    app.name,
+    `${nav(app)}<h1>${escapeHtml(app.name)}</h1>
+<h2>What this app does</h2>
+<p>Campaign Requirement Extractor is a read-only task app that extracts structured campaign requirement fields from user-provided campaign text.</p>
+<h2>Input</h2>
+<p>The app accepts one input field: <code>campaign_text</code>, containing raw campaign requirement text with explicitly stated campaign details.</p>
+<h2>Structured output</h2>
+<p>The app returns campaign_name, objective, channel, budget, deadline, missing_fields, source_text, and errors.</p>
+<h2>What this app does not do</h2>
+<p>This app does not design campaign strategy, judge budget reasonableness, write marketing copy, recommend channels, publish campaigns, schedule campaigns, send messages, update systems, or take operational actions.</p>
+<h2>Safety and data handling</h2>
+<p>The app is stateless, read-only, does not require login, does not store submitted data, and does not call external APIs.</p>
+<h2>MCP endpoint</h2>
+<p><code>/${app.slug}/mcp</code></p>
+<h2>Contact</h2>
+<p>Support contact: ${campaignSupportLink}.</p>`
+  );
+}
+
+function renderCampaignRequirementPrivacyPage(app: AppDefinition): string {
+  const campaignSupportLink = `<a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>`;
+  return page(
+    `${app.name} Privacy`,
+    `${nav(app)}<h1>${escapeHtml(app.name)} Privacy</h1>
+<h2>Data Collected</h2>
+<p>The app processes only campaign requirement text submitted by the user in the current request. It does not collect data from external sources, scrape websites, or fetch additional data.</p>
+<h2>Tool Input</h2>
+<p>Expected tool input: <code>campaign_text</code>.</p>
+<h2>Tool Outputs</h2>
+<p>The app may return campaign_name, objective, channel, budget, deadline, missing_fields, source_text, and errors.</p>
+<h2>Purpose of Processing</h2>
+<p>Purpose: uses submitted text only to extract explicitly stated campaign requirement fields.</p>
+<h2>Recipients and Sharing</h2>
+<p>The app does not sell user data, does not share submitted data with downstream systems, and does not call external APIs.</p>
+<h2>Retention</h2>
+<p>The app does not store submitted inputs or generated outputs after request processing is complete, aside from transient platform-level request handling and logs.</p>
+<h2>User Controls</h2>
+<p>Users control what they submit and may remove sensitive details before submitting text. Privacy questions or deletion requests can be sent to ${campaignSupportLink}.</p>
+<h2>Login and Accounts</h2>
+<p>No login or account is required.</p>
+<h2>No Downstream Writes</h2>
+<p>The app does not update campaigns, ad accounts, calendars, email systems, databases, or other external systems.</p>
+<h2>Read-Only Operation</h2>
+<p>The app is read-only, stateless, and has no side effects.</p>
+<h2>Contact</h2>
+<p>Support contact: ${campaignSupportLink}.</p>`
+  );
+}
+
+function renderCampaignRequirementTermsPage(app: AppDefinition): string {
+  const campaignSupportLink = `<a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>`;
+  return page(
+    `${app.name} Terms`,
+    `${nav(app)}<h1>${escapeHtml(app.name)} Terms</h1>
+<h2>Permitted Use</h2>
+<p>Campaign Requirement Extractor may be used to extract explicitly stated campaign requirement fields from user-provided campaign text.</p>
+<h2>User Responsibility</h2>
+<p>Users should submit only text they have the right to process and should remove sensitive or unnecessary personal data before submitting text.</p>
+<h2>Limitations</h2>
+<p>The app does not infer missing values, normalize budgets into another currency, judge whether a budget is reasonable, recommend channels, rewrite objectives, or create campaign strategy.</p>
+<h2>No Operational Actions</h2>
+<p>The app does not publish campaigns, schedule campaigns, send messages, update records, contact external parties, or modify external systems.</p>
+<h2>Data and External Systems</h2>
+<p>The app is stateless, read-only, unauthenticated, does not store submitted data, and does not call external APIs.</p>
+<h2>Contact</h2>
+<p>Support questions, privacy questions, or deletion requests can be sent to ${campaignSupportLink}.</p>`
+  );
+}
+
+function renderCampaignRequirementSupportPage(app: AppDefinition): string {
+  const campaignSupportLink = `<a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>`;
+  return page(
+    `${app.name} Support`,
+    `${nav(app)}<h1>${escapeHtml(app.name)} Support</h1>
+<h2>Contact</h2>
+<p>For support, privacy questions, or deletion requests, contact ${campaignSupportLink}.</p>
+<h2>What to Include</h2>
+<p>When contacting support, include the app name, the page or endpoint involved, a brief description of the issue, and any non-sensitive example input needed to reproduce the problem.</p>
+<h2>Support Scope</h2>
+<p>Support covers app availability, review pages, MCP endpoint behavior, schema issues, and privacy or deletion questions.</p>
+<h2>App Boundaries</h2>
+<p>This app only extracts explicitly stated campaign requirement fields. It does not design campaign strategy, judge budget reasonableness, write marketing copy, recommend channels, publish, schedule, send messages, update systems, or take operational actions.</p>
+<h2>Data Handling</h2>
+<p>This app processes only submitted <code>campaign_text</code>. It is read-only, stateless, does not store submitted inputs or outputs, and does not call external APIs.</p>`
   );
 }
 
