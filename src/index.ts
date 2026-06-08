@@ -437,8 +437,9 @@ function extractCampaignRequirement(input: unknown): CampaignRequirementOutput {
     return campaignErrorOutput("missing_field", "campaign_text is required.", "");
   }
 
+  const originalSourceText = typeof input.campaign_text === "string" ? input.campaign_text : "";
   if (typeof input.campaign_text !== "string" || input.campaign_text.trim() === "") {
-    return campaignErrorOutput("invalid_value", "campaign_text must be a non-empty string.", "");
+    return campaignErrorOutput("invalid_value", "campaign_text must be a non-empty string.", originalSourceText);
   }
 
   const sourceText = input.campaign_text.trim();
@@ -446,7 +447,7 @@ function extractCampaignRequirement(input: unknown): CampaignRequirementOutput {
     return campaignErrorOutput(
       "out_of_scope",
       "This tool only extracts explicitly stated campaign requirement fields and cannot design campaign strategy, judge budget reasonableness, write marketing copy, recommend channels, publish, schedule, send messages, update systems, or take operational actions.",
-      sourceText
+      originalSourceText
     );
   }
 
@@ -493,7 +494,7 @@ function extractCampaignRequirement(input: unknown): CampaignRequirementOutput {
     budget,
     deadline,
     missing_fields: missingFields,
-    source_text: sourceText,
+    source_text: originalSourceText,
     errors: []
   };
 }
