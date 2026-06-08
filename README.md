@@ -19,6 +19,8 @@ Current apps:
 - MCP endpoint: `/content-brief-extractor/mcp`
 - Campaign Requirement Extractor: `/campaign-requirement-extractor`
 - MCP endpoint: `/campaign-requirement-extractor/mcp`
+- Social Post Metadata Extractor: `/social-post-metadata-extractor`
+- MCP endpoint: `/social-post-metadata-extractor/mcp`
 
 Each app is a stateless, deterministic, read-only single-task node. Each app has exactly one MCP endpoint and exposes exactly one tool from that endpoint.
 
@@ -63,6 +65,11 @@ Project support email for review pages: `sidcraigau@gmail.com`.
 - Campaign terms: `http://127.0.0.1:8787/campaign-requirement-extractor/terms`
 - Campaign support: `http://127.0.0.1:8787/campaign-requirement-extractor/support`
 - Campaign MCP: `http://127.0.0.1:8787/campaign-requirement-extractor/mcp`
+- Social post metadata app home: `http://127.0.0.1:8787/social-post-metadata-extractor`
+- Social post metadata privacy: `http://127.0.0.1:8787/social-post-metadata-extractor/privacy`
+- Social post metadata terms: `http://127.0.0.1:8787/social-post-metadata-extractor/terms`
+- Social post metadata support: `http://127.0.0.1:8787/social-post-metadata-extractor/support`
+- Social post metadata MCP: `http://127.0.0.1:8787/social-post-metadata-extractor/mcp`
 
 There is no generic `/mcp`, `/mcp/{app-slug}`, `/api/mcp`, `/tools`, `/sse`, `/privacy`, `/terms`, or `/support`.
 
@@ -134,6 +141,20 @@ Expected response includes exactly one tool: `campaign_requirement_extractor`, w
 {"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
 ```
 
+Social Post Metadata Extractor:
+
+```bash
+curl -X POST http://127.0.0.1:8787/social-post-metadata-extractor/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+```
+
+Expected response includes exactly one tool: `social_post_metadata_extractor`, with `description`, `inputSchema`, `outputSchema`, and annotations:
+
+```json
+{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+```
+
 ## Test `tools/call`
 
 Content Brief Extractor:
@@ -187,6 +208,31 @@ Expected `structuredContent`:
 
 The extractor only returns explicitly stated `campaign_name`, `objective`, `channel`, `budget`, and `deadline` values. Missing extracted fields are returned as `null` and listed in `missing_fields`. It does not infer values, normalize budget currency, recommend channels, judge budget reasonableness, write copy, publish, schedule, send messages, update systems, or perform operational actions.
 
+Social Post Metadata Extractor:
+
+```bash
+curl -X POST http://127.0.0.1:8787/social-post-metadata-extractor/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"social_post_metadata_extractor","arguments":{"post_text":"Platform: LinkedIn. Post time: June 20, 2026 at 9 AM. Topic: AI workflow automation for solo founders. Asset requirements: product screenshot and short demo clip."}}}'
+```
+
+Expected `structuredContent`:
+
+```json
+{
+  "status": "success",
+  "platform": "LinkedIn",
+  "post_time": "June 20, 2026 at 9 AM",
+  "topic": "AI workflow automation for solo founders",
+  "asset_requirements": "product screenshot and short demo clip",
+  "missing_fields": [],
+  "source_text": "Platform: LinkedIn. Post time: June 20, 2026 at 9 AM. Topic: AI workflow automation for solo founders. Asset requirements: product screenshot and short demo clip.",
+  "errors": []
+}
+```
+
+The extractor only returns explicitly stated `platform`, `post_time`, `topic`, and `asset_requirements` values. Missing extracted fields are returned as `null` and listed in `missing_fields`. It does not write posts, generate captions, recommend platforms, create assets, publish, schedule, send messages, update calendars, call social media APIs, contact external services, or perform operational actions.
+
 ## Local Regression Checks
 
 After adding or changing an app, run:
@@ -204,6 +250,8 @@ Then confirm:
 - `POST /content-brief-extractor/mcp` supports `initialize`, `tools/list`, and `tools/call`; `tools/list` exposes only `content_brief_extractor`.
 - `POST /campaign-requirement-extractor/mcp` supports `initialize`, `tools/list`, and `tools/call`; `tools/list` exposes only `campaign_requirement_extractor`.
 - Content Brief Extractor `outputSchema` and annotations remain unchanged when new apps are added.
+- `POST /social-post-metadata-extractor/mcp` supports `initialize`, `tools/list`, and `tools/call`; `tools/list` exposes only `social_post_metadata_extractor`.
+- Social Post Metadata Extractor `tools/list` includes `description`, `inputSchema`, `outputSchema`, and annotations.
 
 ## Common Failures
 
