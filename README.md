@@ -19,7 +19,7 @@ Current apps:
 - MCP endpoint: `/content-brief-extractor/mcp`
 - Campaign Requirement Extractor: `/campaign-requirement-extractor`
 - MCP endpoint: `/campaign-requirement-extractor/mcp`
-- Social Post Metadata Extractor: `/social-post-metadata-extractor`
+- Post Metadata Extractor: `/social-post-metadata-extractor`
 - MCP endpoint: `/social-post-metadata-extractor/mcp`
 
 Each app is a stateless, deterministic, read-only single-task node. Each app has exactly one MCP endpoint and exposes exactly one tool from that endpoint.
@@ -141,7 +141,7 @@ Expected response includes exactly one tool: `campaign_requirement_extractor`, w
 {"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
 ```
 
-Social Post Metadata Extractor:
+Post Metadata Extractor:
 
 ```bash
 curl -X POST http://127.0.0.1:8787/social-post-metadata-extractor/mcp \
@@ -208,7 +208,7 @@ Expected `structuredContent`:
 
 The extractor only returns explicitly stated `campaign_name`, `objective`, `channel`, `budget`, and `deadline` values. Missing extracted fields are returned as `null` and listed in `missing_fields`. It does not infer values, normalize budget currency, recommend channels, judge budget reasonableness, write copy, publish, schedule, send messages, update systems, or perform operational actions.
 
-Social Post Metadata Extractor:
+Post Metadata Extractor:
 
 ```bash
 curl -X POST http://127.0.0.1:8787/social-post-metadata-extractor/mcp \
@@ -251,7 +251,7 @@ Then confirm:
 - `POST /campaign-requirement-extractor/mcp` supports `initialize`, `tools/list`, and `tools/call`; `tools/list` exposes only `campaign_requirement_extractor`.
 - Content Brief Extractor `outputSchema` and annotations remain unchanged when new apps are added.
 - `POST /social-post-metadata-extractor/mcp` supports `initialize`, `tools/list`, and `tools/call`; `tools/list` exposes only `social_post_metadata_extractor`.
-- Social Post Metadata Extractor `tools/list` includes `description`, `inputSchema`, `outputSchema`, and annotations.
+- Post Metadata Extractor `tools/list` includes `description`, `inputSchema`, `outputSchema`, and annotations.
 
 ## Common Failures
 
