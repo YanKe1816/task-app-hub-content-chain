@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "task-app-workers-hub",
+  "name": "task-app-hub-content-chain",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-07",
   "vars": {
