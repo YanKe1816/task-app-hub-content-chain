@@ -229,7 +229,7 @@ const CAMPAIGN_REQUIREMENT_TOOL: ToolDefinition = {
 
 const SOCIAL_POST_METADATA_TOOL: ToolDefinition = {
   name: "social_post_metadata_extractor",
-  title: "Social Post Metadata Extractor",
+  title: "Post Metadata Extractor",
   description:
     "Use this tool when the user provides a social media posting request and needs structured social post metadata fields. The tool returns platform, post time, topic, asset requirements, missing fields, source text, and errors. Do not use this tool to write social posts, publish posts, schedule posts, recommend platforms, create assets, contact external services, or perform any operational action. This tool is useful when deterministic structured extraction is needed.",
   inputSchema: {
@@ -330,7 +330,7 @@ const APPS: AppDefinition[] = [
   },
   {
     slug: "social-post-metadata-extractor",
-    name: "Social Post Metadata Extractor",
+    name: "Post Metadata Extractor",
     tool: SOCIAL_POST_METADATA_TOOL,
     call: extractSocialPostMetadata,
     renderHome: renderSocialPostMetadataHome,
@@ -779,7 +779,7 @@ function renderSocialPostMetadataHome(app: AppDefinition): string {
     app.name,
     `${nav(app)}<h1>${escapeHtml(app.name)}</h1>
 <h2>What this app does</h2>
-<p>Social Post Metadata Extractor is a read-only task app that extracts structured social post metadata fields from user-provided social media posting request text.</p>
+<p>Post Metadata Extractor is a read-only task app that extracts structured social post metadata fields from user-provided social media posting request text.</p>
 <h2>Expected input</h2>
 <p>The app accepts one input field: <code>post_text</code>, containing raw social media posting request text with explicitly stated metadata.</p>
 <h2>Structured output</h2>
@@ -825,7 +825,7 @@ function renderSocialPostMetadataTermsPage(app: AppDefinition): string {
     `${app.name} Terms`,
     `${nav(app)}<h1>${escapeHtml(app.name)} Terms</h1>
 <h2>Permitted Use</h2>
-<p>Social Post Metadata Extractor may be used to extract explicitly stated platform, post time, topic, and asset requirement fields from user-provided social posting request text.</p>
+<p>Post Metadata Extractor may be used to extract explicitly stated platform, post time, topic, and asset requirement fields from user-provided social posting request text.</p>
 <h2>User Responsibility</h2>
 <p>Users should submit only text they have the right to process and should remove sensitive or unnecessary personal data before submitting text.</p>
 <h2>Limitations</h2>
